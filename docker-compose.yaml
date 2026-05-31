@@ -1,0 +1,14 @@
+services:
+  db:
+    image: postgres:latest
+    restart: unless-stopped
+    container_name: models_db
+    environment:
+      - POSTGRES_USER=postgres_admin
+      - POSTGRES_PASSWORD=dbllmproxy
+      - POSTGRES_DB=DB
+
+    ports:
+      - "5432:5432"
+    volumes:
+      - .src/db:/var/lib/postgresql/data
