@@ -5,13 +5,14 @@ from contextlib import asynccontextmanager
 from .schemas import Request, Response
 from fastapi import FastAPI, HTTPException
 from .database import init_db, SessionLocal, CallLog
-from dotenv import load_dotenv
-
-load_dotenv()
+from .cache import init_cache
+from .config import settings
 
 @asynccontextmanager
-def startup(app: FastAPI):
+async def startup(app: FastAPI):
     init_db()
+    init_cache()
+    yield
 
 app = FastAPI(lifespan=startup)
 
@@ -20,7 +21,7 @@ COST_PER_OUTPUT_TOKEN = 0.00000125
 
 @app.post("/generate", response_model=Response)
 async def generate_response(request: Request):
-    api_key = os.getenv("ANTHROPIC_API_KEY")
+    api_key = settings.anthropic_api_key
     if not api_key:
         raise HTTPException(status_code=500, detail="API Key not configured")
 
@@ -49,7 +50,9 @@ async def generate_response(request: Request):
     text = data["content"][0]["text"]
 
     input_tokens = data["usage"]["input_tokens"]
-    output_tokens = data["output_tokens"]
+    output_tokens = data["usage"]["output_tokens"]
+
+    cost_usd = (input_tokens * COST_PER_INPUT_TOKEN) + (output_tokens * COST_PER_OUTPUT_TOKEN)
 
     db = SessionLocal()
 
@@ -60,14 +63,14 @@ async def generate_response(request: Request):
             latency_ms=latency_ms,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            cost_usd=(input_tokens * COST_PER_INPUT_TOKEN) + (output_tokens * COST_PER_OUTPUT_TOKEN)
+            cost_usd=cost_usd
         )
         db.add(log)
         db.commit()
     finally:
         db.close()
 
-    return Response(response=text, model=request.model, latency_ms=round(latency_ms, 2))
+    return Response(response=text, model=request.model, latency_ms=round(latency_ms, 2), input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=cost_usd)
 
         
 
