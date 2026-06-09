@@ -1,24 +1,26 @@
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
+from qdrant_client import AsyncQdrantClient
+from qdrant_client.models import Distance, VectorParams, PointStruct, ScoredPoint
 from sentence_transformers import SentenceTransformer
 from .config import settings
 from uuid import uuid4
-import asyncio
+from functools import partial
+import asyncio 
+import time
 
-client = QdrantClient(host="localhost", port=6333)
+client = AsyncQdrantClient(host="localhost", port=6333)
 encoder = SentenceTransformer("all-MiniLM-L6-v2")
 
 COLLECTION_NAME="prompt_cache"
 EMBEDDING_DIM=384
 
-def init_cache():
-    print(client.get_collections())
-    existing = [c.name for c in client.get_collections().collections]
+async def init_cache():
+    collections = await client.get_collections()
+    existing = [c.name for c in collections.collections]
 
     if COLLECTION_NAME not in existing:
-        client.create_collection(
+        await client.create_collection(
             collection_name=COLLECTION_NAME,
-            vectorConfig=VectorParams(size=EMBEDDING_DIM, distance=Distance.COSINE)
+            vectors_config=VectorParams(size=EMBEDDING_DIM, distance=Distance.COSINE)
         )
         print(f"Collection created: {COLLECTION_NAME}")
     
@@ -26,22 +28,29 @@ def init_cache():
         print(f"Collection already exists {COLLECTION_NAME}")
 
 
-def embed(text: str) -> list[float]:
-    return encoder.encode(text).tolist()
+async def embed(text: str) -> list[float]:
+    loop = asyncio.get_event_loop()
+    vector = await loop.run_in_executor(None, partial(encoder.encode, text))
+    return vector.tolist()
 
-def query_cache(text: str) -> str | None:
-    query_vector = embed(text)
-    results = client.query_points(
+async def query_cache(text: str) -> tuple[list[ScoredPoint], float]:
+
+    start = time.perf_counter()
+
+    query_vector = await embed(text)
+    results = await client.query_points(
         collection_name=COLLECTION_NAME,
         query=query_vector,
         limit=1
     )
 
-    return results
+    latency_ms = (time.perf_counter() - start) * 1000
 
-def cache(prompt: str, response: str) -> None:
-    vector = embed(prompt)
-    client.upsert(
+    return results, latency_ms
+
+async def cache(prompt: str, response: str) -> None:
+    vector = await embed(prompt)
+    await client.upsert(
         collection_name=COLLECTION_NAME,
         points=[
             PointStruct(

@@ -4,3 +4,5 @@ httpx
 python-dotenv
 sqlalchemy
 pydantic-settings
+qdrant-client
+sentence-transformers

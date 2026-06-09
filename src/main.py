@@ -1,26 +1,38 @@
-import os
 import time
 import httpx
 from contextlib import asynccontextmanager
 from .schemas import Request, Response
 from fastapi import FastAPI, HTTPException
 from .database import init_db, SessionLocal, CallLog
-from .cache import init_cache
+from .cache import init_cache, query_cache, cache
 from .config import settings
 
 @asynccontextmanager
-async def startup(app: FastAPI):
+async def lifespan(app: FastAPI):
     init_db()
-    init_cache()
+    await init_cache()
     yield
 
-app = FastAPI(lifespan=startup)
+app = FastAPI(lifespan=lifespan)
 
 COST_PER_INPUT_TOKEN  = 0.00000025
 COST_PER_OUTPUT_TOKEN = 0.00000125
 
 @app.post("/generate", response_model=Response)
 async def generate_response(request: Request):
+
+    cache_result, latency_ms = await query_cache(request.prompt)[0]
+    
+    if cache_result:
+        return Response(
+            response=cache_result.payload.response,
+            model=request.model,
+            input_tokens=0,
+            output_tokens=0,
+            latency_ms=round(latency_ms, 2),
+            cost_usd=0
+        )
+
     api_key = settings.anthropic_api_key
     if not api_key:
         raise HTTPException(status_code=500, detail="API Key not configured")
@@ -53,6 +65,8 @@ async def generate_response(request: Request):
     output_tokens = data["usage"]["output_tokens"]
 
     cost_usd = (input_tokens * COST_PER_INPUT_TOKEN) + (output_tokens * COST_PER_OUTPUT_TOKEN)
+
+    await cache(request.prompt, text)
 
     db = SessionLocal()
 
