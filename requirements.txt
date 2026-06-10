@@ -3,6 +3,8 @@ uvicorn[standard]
 httpx
 python-dotenv
 sqlalchemy
+asyncpg
 pydantic-settings
 qdrant-client
 sentence-transformers
+pytest

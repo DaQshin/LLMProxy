@@ -3,13 +3,13 @@ import httpx
 from contextlib import asynccontextmanager
 from .schemas import Request, Response
 from fastapi import FastAPI, HTTPException
-from .database import init_db, SessionLocal, CallLog
+from .database import init_db, get_db_session, CallLog
 from .cache import init_cache, query_cache, cache
 from .config import settings
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
+    await init_db()
     await init_cache()
     yield
 
@@ -21,7 +21,7 @@ COST_PER_OUTPUT_TOKEN = 0.00000125
 @app.post("/generate", response_model=Response)
 async def generate_response(request: Request):
 
-    cache_result, latency_ms = await query_cache(request.prompt)[0]
+    cache_result, latency_ms = await query_cache(request.prompt)
     
     if cache_result:
         return Response(
@@ -68,21 +68,19 @@ async def generate_response(request: Request):
 
     await cache(request.prompt, text)
 
-    db = SessionLocal()
+    session = get_db_session()
 
-    try: 
-        log = CallLog(
-            prompt=request.prompt,
-            model=request.model,
-            latency_ms=latency_ms,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cost_usd=cost_usd
-        )
-        db.add(log)
-        db.commit()
-    finally:
-        db.close()
+     
+    log = CallLog(
+        prompt=request.prompt,
+        model=request.model,
+        latency_ms=latency_ms,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cost_usd=cost_usd
+    )
+    await session.add(log)
+    await session.commit()
 
     return Response(response=text, model=request.model, latency_ms=round(latency_ms, 2), input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=cost_usd)
 
