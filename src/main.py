@@ -1,16 +1,17 @@
 import time
 import httpx
 from contextlib import asynccontextmanager
+from sqlalchemy.ext.asyncio import AsyncSession
 from .schemas import Request, Response
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from .database import init_db, get_db_session, CallLog
-from .cache import init_cache, query_cache, cache
+from .cache import cache
 from .config import settings
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    await init_cache()
+    await cache.init_cache()
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -19,17 +20,17 @@ COST_PER_INPUT_TOKEN  = 0.00000025
 COST_PER_OUTPUT_TOKEN = 0.00000125
 
 @app.post("/generate", response_model=Response)
-async def generate_response(request: Request):
+async def generate_response(request: Request, session: AsyncSession = Depends(get_db_session)):
 
-    cache_result, latency_ms = await query_cache(request.prompt)
+    cache_result, cache_latency_ms = await cache.get(request.prompt)
     
     if cache_result:
         return Response(
-            response=cache_result.payload.response,
+            response=cache_result['response'],
             model=request.model,
             input_tokens=0,
             output_tokens=0,
-            latency_ms=round(latency_ms, 2),
+            latency_ms=round(cache_latency_ms, 2),
             cost_usd=0
         )
 
@@ -66,10 +67,7 @@ async def generate_response(request: Request):
 
     cost_usd = (input_tokens * COST_PER_INPUT_TOKEN) + (output_tokens * COST_PER_OUTPUT_TOKEN)
 
-    await cache(request.prompt, text)
-
-    session = get_db_session()
-
+    await cache.set(request.prompt, text)
      
     log = CallLog(
         prompt=request.prompt,
@@ -79,7 +77,7 @@ async def generate_response(request: Request):
         output_tokens=output_tokens,
         cost_usd=cost_usd
     )
-    await session.add(log)
+    session.add(log)
     await session.commit()
 
     return Response(response=text, model=request.model, latency_ms=round(latency_ms, 2), input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=cost_usd)

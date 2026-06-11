@@ -7,4 +7,3 @@ asyncpg
 pydantic-settings
 qdrant-client
 sentence-transformers
-pytest
