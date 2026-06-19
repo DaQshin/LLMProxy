@@ -1,32 +1,43 @@
 import time
-import httpx
 from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
 from .schemas import Request, Response
 from fastapi import FastAPI, HTTPException, Depends
 from .database import init_db, get_db_session, CallLog
-from .cache import cache
 from .config import settings
+from .providers import ClaudeProvider
+from .semantic_cache import semantic_cache
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    await cache.init_cache()
+    await semantic_cache.init_cache()
     yield
+
+    await semantic_cache.close()
 
 app = FastAPI(lifespan=lifespan)
 
 COST_PER_INPUT_TOKEN  = 0.00000025
 COST_PER_OUTPUT_TOKEN = 0.00000125
 
-@app.post("/generate", response_model=Response)
-async def generate_response(request: Request, session: AsyncSession = Depends(get_db_session)):
+claude_provide = ClaudeProvider()
 
-    cache_result, cache_latency_ms = await cache.get(request.prompt)
+@app.post("/generate", response_model=Response)
+async def generate_response(
+    request: Request, 
+    session: AsyncSession = Depends(get_db_session)
+    ):
+
+    start = time.perf_counter()
+
+    cached = await semantic_cache.get(request.prompt)
+
+    cache_latency_ms = time.perf_counter() - start
     
-    if cache_result:
+    if cached:
         return Response(
-            response=cache_result['response'],
+            response=cached,
             model=request.model,
             input_tokens=0,
             output_tokens=0,
@@ -40,34 +51,25 @@ async def generate_response(request: Request, session: AsyncSession = Depends(ge
 
     start = time.perf_counter()
 
-    async with httpx.AsyncClient() as client:
-        res = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json"
-            },
-            json={
-                "model": request.model, 
-                "max_tokens": request.max_tokens,
-                "messages": [{
-                    "role": "user", 
-                    "content": request.prompt
-                    }]
-            },
-            timeout=30.0)
+    try:
+        res = await claude_provide.generate(
+            prompt=request.prompt, 
+            model=request.model, 
+            max_tokens=request.max_tokens
+            )
 
-    data = res.json()
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
     latency_ms = (time.perf_counter() - start) * 1000
-    text = data["content"][0]["text"]
+    text = res.text
 
-    input_tokens = data["usage"]["input_tokens"]
-    output_tokens = data["usage"]["output_tokens"]
+    input_tokens = res.input_tokens
+    output_tokens = res.output_tokens 
 
     cost_usd = (input_tokens * COST_PER_INPUT_TOKEN) + (output_tokens * COST_PER_OUTPUT_TOKEN)
 
-    await cache.set(request.prompt, text)
+    await semantic_cache.set(request.prompt, text)
      
     log = CallLog(
         prompt=request.prompt,
@@ -80,7 +82,14 @@ async def generate_response(request: Request, session: AsyncSession = Depends(ge
     session.add(log)
     await session.commit()
 
-    return Response(response=text, model=request.model, latency_ms=round(latency_ms, 2), input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=cost_usd)
+    return Response(
+        response=text, 
+        model=request.model, 
+        latency_ms=round(latency_ms, 2), 
+        input_tokens=input_tokens, 
+        output_tokens=output_tokens, 
+        cost_usd=cost_usd
+        )
 
         
 
