@@ -5,7 +5,7 @@ from .schemas import Request, Response
 from fastapi import FastAPI, HTTPException, Depends
 from .database import init_db, get_db_session, CallLog
 from .config import settings
-from .providers import ClaudeProvider
+from .providers import ClaudeProvider, OpenAIProvider, ProviderRouter, TokenBucket
 from .semantic_cache import semantic_cache
 
 @asynccontextmanager
@@ -21,7 +21,13 @@ app = FastAPI(lifespan=lifespan)
 COST_PER_INPUT_TOKEN  = 0.00000025
 COST_PER_OUTPUT_TOKEN = 0.00000125
 
-claude_provide = ClaudeProvider()
+provider_router = ProviderRouter([
+    OpenAIProvider(),
+    ClaudeProvider(),  
+], rate_limits={
+        "claude": TokenBucket(rate=1.0, capacity=5),
+        "openai": TokenBucket(rate=1.0, capacity=5),
+})
 
 @app.post("/generate", response_model=Response)
 async def generate_response(
@@ -52,7 +58,7 @@ async def generate_response(
     start = time.perf_counter()
 
     try:
-        res = await claude_provide.generate(
+        res = await provider_router.generate(
             prompt=request.prompt, 
             model=request.model, 
             max_tokens=request.max_tokens
