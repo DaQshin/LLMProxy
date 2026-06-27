@@ -7,3 +7,5 @@ asyncpg
 pydantic-settings
 qdrant-client
 sentence-transformers
+structlog
+langfuse

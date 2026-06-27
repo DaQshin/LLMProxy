@@ -7,8 +7,9 @@ class Settings(BaseSettings):
     database_url: str
     langcache_api: str
     langcache_id: str
-    qdrant_host: str
-    qdrant_port: int
+    langfuse_secret_key: str
+    langfuse_public_key: str
+    langfuse_host: str
     
     class Config:
         env_file = ".env"

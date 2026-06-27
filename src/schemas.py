@@ -13,3 +13,18 @@ class Response(BaseModel):
     input_tokens: int
     output_tokens: int
     cost_usd: float
+
+class ProviderStats(BaseModel):
+    calls: int
+    avg_input_tokens: float
+    avg_output_tokens: float
+    avg_latency_ms: float
+    avg_cost_usd: float
+
+class StatsResponse(BaseModel):
+    total_calls: int
+    cache_hit_rate: float
+    avg_latency_ms: float
+    total_cost_usd: float
+    by_model: dict[str, ProviderStats]
+
