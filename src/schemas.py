@@ -14,6 +14,9 @@ class Response(BaseModel):
     output_tokens: int
     cost_usd: float
 
+class ErrorResponse(BaseModel):
+    message: str
+
 class ProviderStats(BaseModel):
     calls: int
     avg_input_tokens: float

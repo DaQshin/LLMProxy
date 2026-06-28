@@ -1,5 +1,5 @@
 from .base import BaseProvider, ProviderResponse
-from .rate_limiter import TokenBucket
+from ..rate_limiter import TokenBucket
 import structlog
 
 logger = structlog.get_logger()

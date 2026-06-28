@@ -1,11 +1,12 @@
 import time
 from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
-from .schemas import Request, Response, ProviderStats, StatsResponse
+from .schemas import Request, Response, ProviderStats, StatsResponse, ErrorResponse
 from fastapi import FastAPI, HTTPException, Depends
 from .database import init_db, get_db_session, CallLog
 from .config import settings
-from .providers import ClaudeProvider, OpenAIProvider, ProviderRouter, TokenBucket
+from .providers import ClaudeProvider, OpenAIProvider, ProviderRouter
+from .rate_limiter import TokenBucket
 from .semantic_cache import semantic_cache
 from .logger import setup_logging, logger
 from sqlalchemy import func, select
@@ -34,6 +35,18 @@ provider_router = ProviderRouter([
         "claude": TokenBucket(rate=1.0, capacity=5),
         "openai": TokenBucket(rate=1.0, capacity=5),
 })
+
+bucket = TokenBucket(rate=1.0, capacity=10) 
+
+@app.middleware("http")
+async def rate_limit(request: Request, call_next):
+
+    if not await bucket.acquire():
+        logger.warning("server_rate_limited")
+        return ErrorResponse(message="Request rate limited. Try again later.")
+    
+    response = await call_next(request)
+    return response
 
 @app.middleware("http")
 async def bind_request_id(request: Request, call_next):
