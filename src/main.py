@@ -9,6 +9,8 @@ from .providers import ClaudeProvider, OpenAIProvider, ProviderRouter, TokenBuck
 from .semantic_cache import semantic_cache
 from .logger import setup_logging, logger
 from sqlalchemy import func, select
+import uuid
+from structlog.contextvars import bind_contextvars, clear_contextvars
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -32,6 +34,16 @@ provider_router = ProviderRouter([
         "claude": TokenBucket(rate=1.0, capacity=5),
         "openai": TokenBucket(rate=1.0, capacity=5),
 })
+
+@app.middleware("http")
+async def bind_request_id(request: Request, call_next):
+    clear_contextvars()
+    request_id = str(uuid.uuid4())[:8]
+    bind_contextvars(request_id=request_id)
+    logger.info("request_started", method=request.method, path=request.url.path)
+    response = await call_next(request)
+    logger.info("request_finished", status_code=response.status_code)
+    return response
 
 @app.post("/generate", response_model=Response)
 async def generate_response(
